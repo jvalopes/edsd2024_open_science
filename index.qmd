@@ -1,0 +1,215 @@
+---
+title: "Workshop 'Open Science and Reproducibility with Quarto, GitHub, and R — EDSD 2024/2025'"
+author: "João Victor Antunes Lopes"
+date: "`r Sys.Date()`"
+format:
+  html:
+    toc: true
+    toc-location: left
+    number-sections: true
+    theme: journal 
+    highlight-style: github 
+editor: visual
+---
+
+# Workshop Task
+
+This activity was developed as part of the [Workshop Open Science and Reproducibility](https://www.ekotov.pro/2024-EDSD-open-science-quarto-github/) with Quarto, GitHub, and R using data from the [Scholarly Migration Database](https://www.scholarlymigration.org/). The Workshop was taught by [Egor Kotov](https://www.ekotov.pro/).
+
+From the Scholarly Migration Database, exploratory analyses/visualizations were carried out in order *to capture the main destinations of Brazilian scholarly migrants* restricted to other Latin American countries.
+
+## Packages required:
+
+```{r}
+#| warning: false
+#| message: false
+
+library(tidyverse)
+library(readr)
+library(sf)
+library(spData)
+library(countrycode)
+library(flowmapblue)
+library(flowmapper)
+library(shiny)
+
+```
+
+## Reading the data
+
+The raw data can be found inside the *raw* folder.
+
+```{r}
+#| warning: false
+#| message: false
+
+df <- readr::read_csv("raw/openalex_2024_V1_scholarlymigration_countryflows_enriched.csv")
+
+```
+
+## Useful information about our data
+
+This block of code provides some useful descriptive information about the database used.
+
+```{r}
+#| echo: true
+#| warning: false
+#| message: false
+#| results: "hide"
+
+names(df)
+
+str(df)
+
+dim(df)
+
+head(df)
+
+tail(df)
+
+```
+
+## Filtering only Brazil
+
+As the aim is to investigate only the flow related to Brazil, this block filters out the country of interest.
+
+```{r}
+#| echo: false
+#| warning: false
+#| message: false
+#| results: "hide"
+
+df2 <- df |> 
+  dplyr::filter(countrynamefrom %in% "Brazil") 
+
+```
+
+## Exploratory analysis
+
+This block generates an exploratory visualization of the destinations of scholars whose origin is Brazil.
+
+```{r}
+#| echo: false
+#| warning: false
+#| message: false
+#| fig.width: 10  
+#| fig.height: 6  
+
+df2 |> 
+  filter(regionto == "Latin America & Caribbean") |> 
+  ggplot() +
+  aes(x = year, y = n_migrations) +
+  geom_point() +
+  geom_line() +
+    labs(x = "Years", 
+         y = "Number of migrants",
+         title = "Destination of Brazilian scholars who migrated to Latin America and the Caribbean between 2000 and 2017") +
+    facet_wrap(vars(countrynameto), 
+               labeller = label_wrap_gen(width = 15)) +
+    theme_bw(base_size = 12) +
+    theme(axis.text.x = element_text(angle = 45, 
+                                     vjust = .7))
+
+```
+
+## Prepare the data for the flow map
+
+This block and the following ones prepare the data for plotting the flow map, according to the instructions and paths provided during the Workshop.
+
+### Creates additional data frame
+
+```{r}
+#| echo: true
+#| warning: false
+#| message: false
+#| results: "hide"
+
+countries <- spData::world
+
+dplyr::glimpse(countries)
+
+countries_centroids <- countries |> 
+  st_centroid() |> # finds a center of each country'spolygon
+  st_coordinates() |>  # extracts numeric coorindates from the POINT geometry
+  as.data.frame() |> # converts the matrix to a data.frame 
+  setNames(c("lon", "lat")) |> # renames the columns
+  cbind(countries) |> # adds back all the columns (except for geometry) form `countries`
+  select(iso_a2, lon, lat, name_long) |> 
+  rename("id" = iso_a2)
+
+dplyr::glimpse(countries_centroids)
+
+```
+
+## Applying the steps to my data frame
+
+The interactive flow map was created using the code provided by [this tutorial](https://ropenspain.github.io/spanishoddata/articles/flowmaps-interactive.html).
+
+```{r}
+#| echo: true
+#| warning: false
+#| message: false
+#| results: "hide"
+
+scopus_country_flows <- df2 |> 
+  dplyr::mutate(
+    iso2codefrom = countrycode(iso3codefrom,
+      origin = "iso3c",
+      destination = "iso2c"),
+    iso2codeto = countrycode(iso3codeto,
+      origin = "iso3c",
+      destination = "iso2c"))
+
+```
+
+```{r}
+#| echo: true
+#| warning: false
+#| message: false
+#| results: "hide"
+
+scopus_country_flows2 <- scopus_country_flows |>
+  dplyr::group_by(origin = iso2codefrom, dest = iso2codeto) |>
+  dplyr::summarise(value = sum(n_migrations, na.rm = TRUE), .groups = "drop") |> 
+  dplyr::collect()
+
+```
+
+```{r}
+#| echo: false
+#| warning: false
+#| message: false
+#| include: false
+
+Sys.setenv(MAPBOX_TOKEN = "pk.eyJ1IjoibG9wZXN4b2FvIiwiYSI6ImNtMWtub2kyZzAwNmMybXNlNTg0NHphZjUifQ.WOd57yrAjqJmzam1c15PXg")
+
+```
+
+### Plots the flowmap
+
+```{r}
+#| echo: true
+#| warning: false
+#| message: false
+#| results: "hide" 
+
+flowmap <- flowmapblue(
+  locations = countries_centroids,
+  flows = scopus_country_flows2,
+  mapboxAccessToken = Sys.getenv("MAPBOX_TOKEN"),
+  darkMode = TRUE,
+  animation = FALSE,
+  clustering = TRUE)
+
+```
+
+```{r}
+#| echo: false
+#| warning: false
+#| message: false
+
+htmlwidgets::saveWidget(flowmap, "flowmap.html")
+
+shiny::tags$iframe(src = "flowmap.html", width = "100%", height = "600px")
+
+```
